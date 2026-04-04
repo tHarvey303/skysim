@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "skysim"
+version = "0.1.0"
+description = "Fast, portable sky simulator for broadband optical/IR images"
+requires-python = ">=3.10"
+dependencies = [
+    "jax>=0.4.20",
+    "jaxlib>=0.4.20",
+    "numpy>=1.24",
+    "astropy>=5.3",
+    "healpy>=1.16",
+]
+
+[project.optional-dependencies]
+api = ["fastapi>=0.104", "uvicorn>=0.24"]
+tables = ["scipy>=1.11", "synthesizer>=0.1"]
+dev = ["pytest>=7.4", "pytest-xdist>=3.5"]
+
+[tool.setuptools.packages.find]
+include = ["skysim*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

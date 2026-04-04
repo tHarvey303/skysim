@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Data files (large / generated)
+*.fits
+skysim/data/seds/*.npz
+skysim/data/filters/*.npz
+skysim/data/isochrones/*.npz
+skysim/data/psfs/*.fits
+
+# Node / frontend
+web/node_modules/
+web/dist/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Misc
+*.log
