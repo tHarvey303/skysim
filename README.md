@@ -4,6 +4,13 @@ Fast, portable sky image simulator for generating realistic broadband optical/IR
 
 SkySim generates scientifically grounded mock sky images with galaxies, stars, and telescope effects — from catalog generation through to noisy detector images — in seconds on a single CPU.
 
+## Example of Web UI
+
+Mock JWST RGB star field near the galactic center generated using SkySim. Try it here: https://skysim.tharvey.space
+
+<img width="1440" height="723" alt="image" src="https://github.com/user-attachments/assets/a2449176-2fab-43c5-a107-a300fab609e2" />
+
+
 ## Features
 
 - **Galaxy populations** from a double-Schechter GSMF (Weaver+23) with redshift evolution, mass-size (van der Wel+14), mass-metallicity (Zahid+14), and parametric SFH models
