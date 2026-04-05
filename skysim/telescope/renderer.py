@@ -46,23 +46,68 @@ def _re_kpc_to_pix(
     return re_pix
 
 
+# Filter properties: (effective_wavelength_um, bandwidth_hz, quantum_efficiency)
+# Bandwidth is the integral of the transmission curve in frequency space (approx).
+# QE is approximate total system throughput.
+_FILTER_PROPERTIES: dict[str, tuple[float, float, float]] = {
+    # JWST NIRCam
+    "JWST/NIRCam.F090W": (0.90, 2.5e13, 0.75),
+    "JWST/NIRCam.F115W": (1.15, 2.7e13, 0.78),
+    "JWST/NIRCam.F150W": (1.50, 3.2e13, 0.80),
+    "JWST/NIRCam.F200W": (2.00, 4.6e13, 0.80),
+    "JWST/NIRCam.F277W": (2.77, 6.9e13, 0.78),
+    "JWST/NIRCam.F356W": (3.56, 7.8e13, 0.75),
+    "JWST/NIRCam.F444W": (4.44, 1.0e14, 0.70),
+    # HST ACS/WFC
+    "HST/ACS_WFC.F435W": (0.43, 5.7e13, 0.45),
+    "HST/ACS_WFC.F606W": (0.59, 1.6e14, 0.55),
+    "HST/ACS_WFC.F814W": (0.81, 1.6e14, 0.50),
+    # HST WFC3/IR
+    "HST/WFC3_IR.F105W": (1.05, 2.6e13, 0.55),
+    "HST/WFC3_IR.F125W": (1.25, 2.8e13, 0.55),
+    "HST/WFC3_IR.F160W": (1.54, 2.7e13, 0.50),
+    # Euclid
+    "Euclid/VIS.vis":  (0.70, 2.5e14, 0.55),
+    "Euclid/NISP.Y":   (1.02, 4.0e13, 0.50),
+    "Euclid/NISP.J":   (1.25, 3.5e13, 0.50),
+    "Euclid/NISP.H":   (1.65, 4.0e13, 0.50),
+    # Rubin/LSST
+    "LSST/LSST.u": (0.37, 4.0e13, 0.30),
+    "LSST/LSST.g": (0.48, 1.2e14, 0.55),
+    "LSST/LSST.r": (0.62, 1.2e14, 0.60),
+    "LSST/LSST.i": (0.75, 1.0e14, 0.55),
+    "LSST/LSST.z": (0.87, 8.0e13, 0.45),
+    "LSST/LSST.y": (0.97, 5.0e13, 0.25),
+}
+
+_H_CGS = 6.626e-27    # Planck constant in erg*s
+_C_CGS = 2.998e10     # speed of light in cm/s
+
+
+def _get_filter_props(filter_name: str) -> tuple[float, float, float]:
+    """Get (wavelength_um, bandwidth_hz, qe) for a filter, with fallback."""
+    return _FILTER_PROPERTIES.get(filter_name, (1.5, 1e13, 0.6))
+
+
 def _flux_to_electrons(
     log_lnu: jnp.ndarray,
     z: jnp.ndarray,
     dl_mpc: jnp.ndarray,
     telescope_area_m2: float,
     exposure_time_s: float,
-    filter_bandwidth_hz: float = 1e13,
+    filter_name: str = "JWST/NIRCam.F200W",
 ) -> jnp.ndarray:
-    """Convert L_nu to detected electrons (approximate)."""
+    """Convert L_nu to detected electrons using filter-specific properties."""
+    wave_um, bandwidth_hz, qe = _get_filter_props(filter_name)
+    photon_energy = _H_CGS * _C_CGS / (wave_um * 1e-4)  # erg per photon
+
     dl_cm = dl_mpc * 3.0856776e24
     log_fnu = log_lnu + jnp.log10(1.0 + z) - jnp.log10(4.0 * jnp.pi) - 2.0 * jnp.log10(dl_cm)
     fnu = 10.0 ** log_fnu
-    flux = fnu * filter_bandwidth_hz
-    photon_energy = 2e-12  # erg (approximate for NIR)
+    flux = fnu * bandwidth_hz
     collecting_area_cm2 = telescope_area_m2 * 1e4
     photon_rate = flux * collecting_area_cm2 / photon_energy
-    electrons = photon_rate * exposure_time_s * 0.8
+    electrons = photon_rate * exposure_time_s * qe
     return electrons
 
 
@@ -70,15 +115,17 @@ def _log_fnu_to_electrons(
     log_fnu: jnp.ndarray,
     telescope_area_m2: float,
     exposure_time_s: float,
-    filter_bandwidth_hz: float = 1e13,
+    filter_name: str = "JWST/NIRCam.F200W",
 ) -> jnp.ndarray:
     """Convert log10(f_nu) [erg/s/cm^2/Hz] to detected electrons."""
+    wave_um, bandwidth_hz, qe = _get_filter_props(filter_name)
+    photon_energy = _H_CGS * _C_CGS / (wave_um * 1e-4)
+
     fnu = 10.0 ** log_fnu
-    flux = fnu * filter_bandwidth_hz
-    photon_energy = 2e-12
+    flux = fnu * bandwidth_hz
     collecting_area_cm2 = telescope_area_m2 * 1e4
     photon_rate = flux * collecting_area_cm2 / photon_energy
-    electrons = photon_rate * exposure_time_s * 0.8
+    electrons = photon_rate * exposure_time_s * qe
     return electrons
 
 
@@ -232,6 +279,7 @@ def _render_galaxy_catalog(
     tel_area = jnp.pi * (tel.aperture_m / 2.0) ** 2
     electrons = _flux_to_electrons(
         log_lnu, z, dl_mpc, float(tel_area), tel.exposure_time_s,
+        filter_name=config.active_filter,
     )
 
     # Use the total (composite) R_e for point-source classification
@@ -415,6 +463,7 @@ def _render_star_catalog(
     tel_area = jnp.pi * (tel.aperture_m / 2.0) ** 2
     electrons = _log_fnu_to_electrons(
         log_fnu, float(tel_area), tel.exposure_time_s,
+        filter_name=config.active_filter,
     )
 
     npix = tel.npix

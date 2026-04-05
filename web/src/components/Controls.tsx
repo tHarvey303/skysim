@@ -26,6 +26,7 @@ interface Props {
   values: ControlValues;
   onChange: (v: ControlValues) => void;
   onRender: () => void;
+  onPan?: (direction: "N" | "S" | "E" | "W") => void;
   filters: string[];
   telescopes: Record<string, TelescopeInfo>;
   loading: boolean;
@@ -54,6 +55,7 @@ export default function Controls({
   values,
   onChange,
   onRender,
+  onPan,
   filters,
   telescopes,
   loading,

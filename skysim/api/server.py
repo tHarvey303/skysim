@@ -16,17 +16,22 @@ Usage:
 
 from __future__ import annotations
 
+import asyncio
 import io
+import logging
 import struct
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
 import jax.numpy as jnp
 import numpy as np
-from fastapi import APIRouter, FastAPI, Query
+from fastapi import APIRouter, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+
+logger = logging.getLogger(__name__)
 
 from skysim.config import (
     EUCLID_VIS,
@@ -59,8 +64,12 @@ app.add_middleware(
 )
 
 # ---------------------------------------------------------------------------
-# Shared state
+# Limits and shared state
 # ---------------------------------------------------------------------------
+
+RENDER_TIMEOUT_S = 300  # max seconds before a render is aborted
+MAX_IMAGE_PIXELS = 20000  # max pixels per side (20k x 20k)
+_render_pool = ThreadPoolExecutor(max_workers=2)
 
 TELESCOPE_PRESETS = {
     "jwst_nircam": JWST_NIRCAM,
@@ -126,12 +135,34 @@ def _do_render(
     psf_type: str,
     include_stars: bool,
 ):
-    """Run the rendering pipeline and return (result_dict, config, tile)."""
+    """Run the rendering pipeline and return (result_dict, config, tile).
+
+    Raises HTTPException on validation failure or runtime errors.
+    """
     import time
 
     from skysim.coordinates import radec_to_tile
 
     config = _build_config(seed, telescope, filter_code, nside, fov_arcmin, exposure_time_s)
+
+    # Validate image size before committing resources
+    npix = config.telescope.npix
+    if npix > MAX_IMAGE_PIXELS:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Requested image is {npix}x{npix} pixels "
+                f"({npix**2 / 1e6:.0f} Mpx). Maximum is "
+                f"{MAX_IMAGE_PIXELS}x{MAX_IMAGE_PIXELS}. "
+                f"Reduce FoV or increase pixel scale."
+            ),
+        )
+    if npix <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="FoV / pixel scale combination results in 0 pixels.",
+        )
+
     tile_idx = radec_to_tile(config.nside, ra, dec)
     tile = TileInfo.from_index(config.nside, tile_idx)
 
@@ -139,21 +170,70 @@ def _do_render(
     if include_stars:
         layers.append(StarLayer())
 
-    t0 = time.perf_counter()
-    result = render_image(
-        layers=layers,
-        tile=tile,
-        config=config,
-        psf_type=psf_type,
-        psf_fwhm_arcsec=psf_fwhm,
-        mag_limit=mag_limit,
-    )
-    dt = time.perf_counter() - t0
+    try:
+        t0 = time.perf_counter()
+        result = render_image(
+            layers=layers,
+            tile=tile,
+            config=config,
+            psf_type=psf_type,
+            psf_fwhm_arcsec=psf_fwhm,
+            mag_limit=mag_limit,
+        )
+        dt = time.perf_counter() - t0
+    except MemoryError:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                f"Out of memory rendering {npix}x{npix} image. "
+                f"Try reducing FoV or magnitude limit."
+            ),
+        )
+    except Exception as exc:
+        logger.exception("Render failed")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Render failed: {exc}",
+        )
 
     n_gal = len(result["catalogs"].get("galaxies", {}).get("mag", []))
     n_star = len(result["catalogs"].get("stars", {}).get("mag", []))
 
     return result, config, tile, dt, n_gal, n_star
+
+
+async def _do_render_async(
+    ra: float, dec: float, seed: int, telescope: str,
+    filter_code: str, nside: int, fov_arcmin: Optional[float],
+    exposure_time_s: Optional[float], mag_limit: float,
+    psf_fwhm: float, psf_type: str, include_stars: bool,
+):
+    """Run _do_render in a thread pool with a timeout."""
+    loop = asyncio.get_event_loop()
+    try:
+        return await asyncio.wait_for(
+            loop.run_in_executor(
+                _render_pool,
+                _do_render,
+                ra, dec, seed, telescope, filter_code, nside,
+                fov_arcmin, exposure_time_s, mag_limit, psf_fwhm,
+                psf_type, include_stars,
+            ),
+            timeout=RENDER_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Render timed out after {RENDER_TIMEOUT_S}s. "
+                   f"Try reducing FoV, magnitude limit, or image size.",
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        # Re-raise HTTPException if it was wrapped
+        if isinstance(exc.__cause__, HTTPException):
+            raise exc.__cause__
+        raise
 
 # ---------------------------------------------------------------------------
 # API Router
@@ -213,7 +293,7 @@ _Q_STARS = Query(True, description="Include stars")
 
 
 @api.get("/render/raw")
-def render_raw(
+async def render_raw(
     ra: float = _Q_RA,
     dec: float = _Q_DEC,
     seed: int = _Q_SEED,
@@ -232,7 +312,7 @@ def render_raw(
     Response is a binary blob: the image as row-major float32.
     Image dimensions are in X-Image-Width / X-Image-Height headers.
     """
-    result, config, tile, dt, n_gal, n_star = _do_render(
+    result, config, tile, dt, n_gal, n_star = await _do_render_async(
         ra, dec, seed, telescope, filter_code, nside,
         fov_arcmin, exposure_time_s, mag_limit, psf_fwhm, psf_type, include_stars,
     )
@@ -257,7 +337,7 @@ def render_raw(
 
 
 @api.get("/render/png")
-def render_png(
+async def render_png(
     ra: float = _Q_RA,
     dec: float = _Q_DEC,
     seed: int = _Q_SEED,
@@ -275,7 +355,7 @@ def render_png(
     pmax: float = Query(99.5, description="Upper percentile clip"),
 ):
     """Render and return a stretched PNG."""
-    result, config, tile, dt, n_gal, n_star = _do_render(
+    result, config, tile, dt, n_gal, n_star = await _do_render_async(
         ra, dec, seed, telescope, filter_code, nside,
         fov_arcmin, exposure_time_s, mag_limit, psf_fwhm, psf_type, include_stars,
     )
@@ -298,7 +378,7 @@ def render_png(
 
 
 @api.get("/render/fits")
-def render_fits(
+async def render_fits(
     ra: float = _Q_RA,
     dec: float = _Q_DEC,
     seed: int = _Q_SEED,
@@ -317,7 +397,7 @@ def render_fits(
     from astropy.io import fits
     from astropy.wcs import WCS
 
-    result, config, tile, dt, n_gal, n_star = _do_render(
+    result, config, tile, dt, n_gal, n_star = await _do_render_async(
         ra, dec, seed, telescope, filter_code, nside,
         fov_arcmin, exposure_time_s, mag_limit, psf_fwhm, psf_type, include_stars,
     )
@@ -471,7 +551,7 @@ def telescopes_legacy():
 
 
 @app.get("/render")
-def render_legacy(
+async def render_legacy(
     ra: float = Query(180.0),
     dec: float = Query(0.0),
     seed: int = Query(42),
@@ -483,7 +563,7 @@ def render_legacy(
     psf_fwhm: float = Query(0.1),
     include_stars: bool = Query(True),
 ):
-    return render_png(
+    return await render_png(
         ra=ra, dec=dec, seed=seed, telescope=telescope,
         filter_code=filter_code, nside=nside, fov_arcmin=fov_arcmin,
         mag_limit=mag_limit, psf_fwhm=psf_fwhm, include_stars=include_stars,

@@ -24,7 +24,7 @@ class TelescopeConfig:
     aperture_m: float = 6.5           # primary mirror diameter
     read_noise_e: float = 4.0         # electrons
     dark_current_e_s: float = 0.005   # electrons/s
-    exposure_time_s: float = 1000.0   # seconds
+    exposure_time_s: float = 10000.0   # seconds
     filters: List[FilterConfig] = field(default_factory=list)
 
     @property

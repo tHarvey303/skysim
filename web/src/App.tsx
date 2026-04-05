@@ -16,11 +16,11 @@ const DEFAULT_CONTROLS: ControlValues = {
   seed: 42,
   telescope: "jwst_nircam",
   nside: 256,
-  fovArcmin: 0.5,
-  exposureTimeS: 1000,
+  fovArcmin: 1.5,
+  exposureTimeS: 10000,
   magLimit: 28,
   psfFwhm: 0.1,
-  psfType: "gaussian",
+  psfType: "file",
   includeStars: true,
   mode: "single",
   filter: "JWST/NIRCam.F200W",
@@ -132,6 +132,20 @@ export default function App() {
     }
   }, [controls]);
 
+  const panDirection = useCallback((direction: "N" | "S" | "E" | "W") => {
+    const fovDeg = controls.fovArcmin / 60;
+    const decRad = (controls.dec * Math.PI) / 180;
+    let newRa = controls.ra;
+    let newDec = controls.dec;
+    switch (direction) {
+      case "N": newDec = Math.min(90, controls.dec + fovDeg); break;
+      case "S": newDec = Math.max(-90, controls.dec - fovDeg); break;
+      case "E": newRa = (controls.ra - fovDeg / Math.cos(decRad) + 360) % 360; break;
+      case "W": newRa = (controls.ra + fovDeg / Math.cos(decRad) + 360) % 360; break;
+    }
+    setControls((prev) => ({ ...prev, ra: parseFloat(newRa.toFixed(6)), dec: parseFloat(newDec.toFixed(6)) }));
+  }, [controls.ra, controls.dec, controls.fovArcmin]);
+
   const handleDownloadFits = useCallback(async () => {
     const baseParams = {
       ra: controls.ra,
@@ -195,6 +209,7 @@ export default function App() {
           values={controls}
           onChange={setControls}
           onRender={doRender}
+          onPan={panDirection}
           filters={filters}
           telescopes={telescopes}
           loading={loading}
