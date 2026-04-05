@@ -14,13 +14,13 @@ Mock JWST RGB star field near the galactic center generated using SkySim. Try it
 ## Features
 
 - **Galaxy populations** from a double-Schechter GSMF (Weaver+23) with redshift evolution, mass-size (van der Wel+14), mass-metallicity (Zahid+14), and parametric SFH models
-- **Dust attenuation** via Calzetti+00 law with configurable optical depth, integrated through [Synthesizer](https://synthesizer-project.github.io/synthesizer/)
-- **Sersic morphologies** rendered as 2-D stamps with ellipticity and position angle, batched with `jax.vmap`
+- **SPS Modelling with Synthesizer** Configurable SPS modelling using Synthesizer with realistic SFHs, dust reprocessing, nebular emission, all via [Synthesizer](https://synthesizer-project.github.io/synthesizer/)
+- **Two-component Sersic morphologies** rendered as 2-D stamps with ellipticity and position angle, with varying bulge-to-disk ratios, batched with `jax.vmap`
 - **Stellar foreground** from a 4-component Milky Way model (thin/thick disc, halo, bulge)
 - **Large-scale structure** via Zel'dovich approximation density field modulation
 - **PSF convolution** — Gaussian, Moffat, or file-based (e.g. WebbPSF FITS files)
 - **Realistic noise** — Poisson photon noise, read noise, dark current, sky background
-- **23 broadband filters** — JWST NIRCam, HST ACS/WFC3, Rubin/LSST ugrizy, Euclid VIS/NISP, and more
+- **23 broadband filters** — JWST NIRCam, HST ACS/WFC3, Rubin/LSST ugrizy, Euclid VIS/NISP, and more (any SVO-compatible filter can be added)
 - **4 telescope presets** — JWST NIRCam, HST ACS, Rubin LSST, Euclid VIS (custom configs supported)
 - **Deterministic** — same seed + sky position = bit-identical output via hierarchical JAX PRNG
 - **Web UI** — React frontend with interactive pan/zoom, stretch controls, RGB compositing, and filter selection
@@ -142,7 +142,3 @@ Benchmarked on a single CPU (Apple M-series), rendering a 4258x4258 JWST NIRCam 
 - **API**: `fastapi`, `uvicorn`, `pillow`
 - **Table generation**: `scipy`, `synthesizer`
 - **Frontend**: Node.js 18+ (build only)
-
-## License
-
-Research software — see your institution's policies.
