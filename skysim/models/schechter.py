@@ -15,7 +15,7 @@ import jax.numpy as jnp
 
 @dataclass
 class SchechterParams:
-    """Parameters for a double-Schechter function at a single redshift.
+    """Parameters for a single or double-Schechter function at a single redshift.
 
     phi(M) dM = exp(-M/M*) * [phi1*(M/M*)^alpha1 + phi2*(M/M*)^alpha2] d(M/M*)
 
@@ -25,24 +25,44 @@ class SchechterParams:
     log_mstar: float   # log10(M*/Msun)
     phi1: float         # normalisation 1 (Mpc^-3 dex^-1)
     alpha1: float       # faint-end slope 1
-    phi2: float         # normalisation 2
+    phi2: float         # normalisation 2 (or zero for single Schechter)
     alpha2: float       # faint-end slope 2
 
 
 def weaver23_params(z: float) -> SchechterParams:
-    """Weaver+23 COSMOS2020 double-Schechter GSMF parameters.
+    """Weaver+23 COSMOS2020 single/double-Schechter GSMF parameters.
 
     Approximate parameterisation of Table 3 in Weaver+23, interpolated
     linearly between their redshift bins. Valid for 0.2 < z < 5.5.
     """
     # Redshift bin centers and best-fit values from Weaver+23 Table 3
-    z_bins = jnp.array([0.35, 0.65, 0.95, 1.25, 1.75, 2.25, 2.75, 3.50, 4.50])
-    log_mstar_vals = jnp.array([10.79, 10.84, 10.89, 10.93, 10.96, 10.98, 11.02, 11.08, 11.15])
-    log_phi1_vals = jnp.array([-2.44, -2.54, -2.61, -2.75, -2.98, -3.23, -3.41, -3.73, -4.18])
-    alpha1_vals = jnp.array([-0.28, -0.39, -0.28, -0.41, -0.50, -0.73, -0.68, -0.82, -1.04])
-    log_phi2_vals = jnp.array([-3.08, -3.33, -3.55, -3.63, -3.77, -4.20, -4.65, -5.00, -5.50])
-    alpha2_vals = jnp.array([-1.48, -1.53, -1.56, -1.59, -1.57, -1.63, -1.76, -1.88, -2.00])
+    # Using the bin midpoints for z_bins
+    z_bins: Array = jnp.array([
+        0.35, 0.65, 0.95, 1.30, 1.75, 2.25, 2.75, 3.25, 4.00, 5.00, 6.00, 7.00
+    ])
 
+    # Extracting the central median likelihood values
+    log_mstar_vals: Array = jnp.array([
+        10.89, 10.96, 11.02, 11.00, 10.86, 10.78, 10.94, 11.08, 10.65, 10.40, 10.17, 10.23
+    ])
+
+    alpha1_vals: Array = jnp.array([
+        -1.42, -1.40, -1.32, -1.33, -1.48, -1.45, -1.55, -1.55, -1.55, -1.55, -1.55, -1.55
+    ])
+
+    # \Phi values are converted from the table's notation (X * 10^-3) to log10(\Phi)
+    log_phi1_vals: Array = jnp.array([
+        -3.13, -3.19, -3.07, -3.15, -3.54, -3.57, -3.74, -3.96, -3.92, -4.00, -4.30, -4.70
+    ])
+
+    # The second Schechter component is absent for z > 3.0; normalisation phi2 is set to zero and slope alpha2 is not well constrained. Using a very small number for phi2 and a fixed slope to avoid issues with log10(0) and to allow smooth interpolation.   
+    alpha2_vals: Array = jnp.array([
+        -0.45, -0.63, -0.61, -0.49, -0.42, 0.08, -0.07, -0.05, -0.05, -0.05, -0.05, -0.05
+    ])
+    # Second component normalisation phi2 is also zero for z > 3.0; using a very small number to avoid issues with log10(0)
+    log_phi2_vals: Array = jnp.array([
+        -2.97, -3.07, -3.18, -3.44, -3.19, -3.57, -4.30, -99.0, -99.0, -99.0, -99.0, -99.0
+    ])
     z_c = jnp.clip(z, z_bins[0], z_bins[-1])
     log_mstar = jnp.interp(z_c, z_bins, log_mstar_vals)
     log_phi1 = jnp.interp(z_c, z_bins, log_phi1_vals)

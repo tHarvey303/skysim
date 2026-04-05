@@ -182,3 +182,6 @@ skysim/
 - ~~Buttons to render neighboring tiles~~ DONE — added N/S/E/W pan buttons in the Pointing section that shift RA/Dec by the FoV and re-render.
 - ~~Make hard-coded limits in scripts (e.g. maximum number of galaxies to render) configurable via the config system.~~ DONE
 - ~~Add little projection of the sky in the app corner showing the current tile location.~~ DONE
+- Star luminosities for each filter should be based on type assuming a blackbody spectrum and the filter transmission curve, rather than a single fixed luminosity.
+- Per channel balancing for RGB images to improve visual appeal. This could be done by computing the median or 95th percentile pixel value in each channel and applying a scaling factor to bring them into a similar range for display purposes. This would be purely for visualization and would not affect the underlying data values, which would still be in physical units.
+- Better multi-threading or async handling in the API to allow multiple concurrent render requests without blocking. Currently, a long render will block the server from handling other requests. This could be improved by using an async rendering approach or a thread pool executor to handle rendering in separate threads.

@@ -30,7 +30,7 @@ class SFHType(IntEnum):
 TAU_GRID_GYR = jnp.array([0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0])
 
 # Discrete max_age values (Gyr) — age of the stellar population
-AGE_GRID_GYR = jnp.array([0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 13.0])
+AGE_GRID_GYR = jnp.array([0.05, 0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0, 7.0, 10.0, 13.0])
 
 
 def assign_sfh_type(
@@ -54,7 +54,7 @@ def assign_sfh_type(
     u = jax.random.uniform(key, shape=log_mass.shape)
     is_quiescent = u < f_quiescent
 
-    # Quiescent → declining exp, star-forming ��� delayed exp
+    # Quiescent → declining exp, star-forming → delayed exp
     # Small fraction of low-mass star-forming get constant SFH
     key2 = jax.random.fold_in(key, 1)
     u2 = jax.random.uniform(key2, shape=log_mass.shape)

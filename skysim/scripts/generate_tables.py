@@ -44,6 +44,7 @@ FILTER_CODES = [
     "JWST/NIRCam.F200W",
     "JWST/NIRCam.F277W",
     "JWST/NIRCam.F356W",
+    "JWST/NIRCam.F410M",
     "JWST/NIRCam.F444W",
     # HST ACS/WFC3
     "HST/ACS_WFC.F435W",
@@ -64,12 +65,21 @@ FILTER_CODES = [
     "LSST/LSST.i",
     "LSST/LSST.z",
     "LSST/LSST.y",
+    # HSC grizy
+    "Subaru/HSC.g",
+    "Subaru/HSC.r",
+    "Subaru/HSC.i",
+    "Subaru/HSC.z",
+    "Subaru/HSC.y",
+    # Spitzer IRAC
+    "Spitzer/IRAC.I1",
+    "Spitzer/IRAC.I2",
 ]
 
 # Discrete tau_v values for the precomputed grid
 # (optical depth in the V band for ISM component;
 #  birth cloud tau_v is set equal for simplicity)
-TAU_V_GRID = np.array([0.0, 0.1, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0])
+TAU_V_GRID = np.array([0.0, 0.1, 0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0, 5.0])
 
 OUTPUT_DIR = Path(__file__).resolve().parent.parent / "data" / "seds"
 
