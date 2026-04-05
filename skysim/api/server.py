@@ -60,7 +60,8 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["X-Image-Width", "X-Image-Height", "X-Render-Time",
                      "X-Galaxy-Count", "X-Star-Count",
-                     "X-RA-Center", "X-Dec-Center", "X-Pixel-Scale"],
+                     "X-RA-Center", "X-Dec-Center", "X-Pixel-Scale",
+                     "X-Debug-Property", "X-Debug-Vmin", "X-Debug-Vmax"],
 )
 
 # ---------------------------------------------------------------------------
@@ -438,6 +439,81 @@ async def render_fits(
             "X-Render-Time": f"{dt:.2f}",
             "X-Galaxy-Count": str(n_gal),
             "X-Star-Count": str(n_star),
+        },
+    )
+
+
+@api.get("/render/debug")
+async def render_debug(
+    ra: float = _Q_RA,
+    dec: float = _Q_DEC,
+    seed: int = _Q_SEED,
+    telescope: str = _Q_TEL,
+    filter_code: str = _Q_FILTER,
+    nside: int = _Q_NSIDE,
+    fov_arcmin: Optional[float] = _Q_FOV,
+    exposure_time_s: Optional[float] = _Q_EXP,
+    mag_limit: float = _Q_MAG,
+    property: str = Query("redshift", description="Property: redshift, mass, size, magnitude, sersic_n"),
+):
+    """Render a debug map colored by a galaxy property."""
+    import time
+
+    from skysim.coordinates import radec_to_tile
+    from skysim.telescope.renderer import VALID_DEBUG_PROPERTIES, render_debug_map
+
+    if property not in VALID_DEBUG_PROPERTIES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid property '{property}'. Choose from: {VALID_DEBUG_PROPERTIES}",
+        )
+
+    config = _build_config(seed, telescope, filter_code, nside, fov_arcmin, exposure_time_s)
+    npix = config.telescope.npix
+    if npix > MAX_IMAGE_PIXELS:
+        raise HTTPException(status_code=422, detail=f"Image too large ({npix}x{npix}).")
+
+    tile_idx = radec_to_tile(config.nside, ra, dec)
+    tile = TileInfo.from_index(config.nside, tile_idx)
+
+    loop = asyncio.get_event_loop()
+
+    def _run():
+        t0 = time.perf_counter()
+        result = render_debug_map(
+            layers=[GalaxyLayer()],
+            tile=tile,
+            config=config,
+            property_name=property,
+            mag_limit=mag_limit,
+        )
+        dt = time.perf_counter() - t0
+        return result, dt
+
+    try:
+        result, dt = await asyncio.wait_for(
+            loop.run_in_executor(_render_pool, _run),
+            timeout=RENDER_TIMEOUT_S,
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Debug render timed out.")
+
+    img = np.array(result["image"], dtype=np.float32)
+    h, w = img.shape
+
+    return Response(
+        content=img.tobytes(),
+        media_type="application/octet-stream",
+        headers={
+            "X-Image-Width": str(w),
+            "X-Image-Height": str(h),
+            "X-Render-Time": f"{dt:.2f}",
+            "X-Debug-Property": property,
+            "X-Debug-Vmin": f"{result['vmin']:.4f}",
+            "X-Debug-Vmax": f"{result['vmax']:.4f}",
+            "X-RA-Center": f"{tile.ra_center:.6f}",
+            "X-Dec-Center": f"{tile.dec_center:.6f}",
+            "X-Pixel-Scale": f"{config.telescope.pixel_scale:.6f}",
         },
     )
 

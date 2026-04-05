@@ -3,12 +3,14 @@ import {
   downloadFits,
   fetchFilters,
   fetchTelescopes,
+  renderDebug,
   renderRaw,
   type RawImageResult,
   type TelescopeInfo,
 } from "./api";
 import Controls, { type ControlValues } from "./components/Controls";
 import ImageViewer from "./components/ImageViewer";
+import SkyMiniMap from "./components/SkyMiniMap";
 
 const DEFAULT_CONTROLS: ControlValues = {
   ra: 180.0,
@@ -27,6 +29,7 @@ const DEFAULT_CONTROLS: ControlValues = {
   filterR: "JWST/NIRCam.F444W",
   filterG: "JWST/NIRCam.F200W",
   filterB: "JWST/NIRCam.F090W",
+  debugProperty: "redshift",
 };
 
 interface Stats {
@@ -83,7 +86,33 @@ export default function App() {
     };
 
     try {
-      if (controls.mode === "single") {
+      if (controls.mode === "debug") {
+        const result = await renderDebug({
+          ra: controls.ra,
+          dec: controls.dec,
+          seed: controls.seed,
+          telescope: controls.telescope,
+          filter_code: controls.filter,
+          nside: controls.nside,
+          fov_arcmin: controls.fovArcmin,
+          exposure_time_s: controls.exposureTimeS,
+          mag_limit: controls.magLimit,
+          property: controls.debugProperty,
+        });
+        setSingleData(result.data);
+        setRData(null);
+        setGData(null);
+        setBData(null);
+        setImgWidth(result.width);
+        setImgHeight(result.height);
+        setWcsInfo({ raCenter: result.raCenter, decCenter: result.decCenter, pixelScale: result.pixelScale });
+        setStats({
+          renderTime: result.renderTime,
+          galaxyCount: 0,
+          starCount: 0,
+          imageSize: `${result.width}\u00d7${result.height}`,
+        });
+      } else if (controls.mode === "single") {
         const result = await renderRaw({
           ...baseParams,
           filter_code: controls.filter,
@@ -223,6 +252,8 @@ export default function App() {
                 <div className="loading-text">
                   {controls.mode === "rgb"
                     ? "Rendering 3 filters..."
+                    : controls.mode === "debug"
+                    ? `Rendering ${controls.debugProperty} map...`
                     : "Rendering..."}
                 </div>
               </div>
@@ -239,6 +270,7 @@ export default function App() {
             onDownloadFits={handleDownloadFits}
             wcsInfo={wcsInfo}
           />
+          <SkyMiniMap ra={controls.ra} dec={controls.dec} />
         </div>
       </div>
     </>

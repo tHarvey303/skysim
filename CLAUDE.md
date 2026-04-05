@@ -167,18 +167,18 @@ skysim/
 - ~~More options for scaling control if relevant (e.g., set the asinh parameter)~~ DONE
 - ~~Double check noise thresholds and cutoffs~~ DONE — replaced hardcoded filter bandwidth/photon energy with per-filter properties (wavelength, bandwidth, QE) for all supported filters.
 - ~~More graceful handling of large images and app recovery~~ DONE — added render timeout (300s), image size validation (max 20k px), MemoryError catch, async rendering in thread pool.
-- More extensive validation of the galaxy population properties (mass, size, magnitude distributions) against observed data and the input models. This could include plotting the distributions of these properties for the generated catalog and comparing to the input Schechter function, mass-size relation, and MZR to verify that the sampling and interpolation are working correctly.
+- ~~More extensive validation of the galaxy population properties~~ DONE — scripts/validate.py plots GSMF, mass-size, MZR, magnitude and redshift distributions vs input models
 - More options for e.g. split between quiescent vs star-forming galaxies, reflect realistic color distributions, etc. This could be done by adding a "galaxy type" parameter to the galaxy model and using different SFH/photometry models for different types, with the fraction of each type as a function of mass and redshift based on observations.
-- Some debug plots to show the distribution of galaxy properties (mass, size, magnitude) and compare to the input distributions to verify that the sampling is working as expected.
+- ~~Some debug plots to show the distribution of galaxy properties~~ DONE — added scripts/validate.py
 - Represent some star-forming galaxies as clumpy rather than smooth Sersic profiles, to add more visual diversity and realism. This could be done by adding a "clumpiness" parameter to the galaxy model and rendering a few bright clumps in addition to the smooth component for high-SFR galaxies. Total SFR would be conserved, just distributed differently spatially. 
 - ~~Pull more physical parameters into the config (e.g. mass function parameters, size relation parameters).~~ DONE
 - ~~Confusion noise from unresolved faint galaxies.~~ DONE
 - Optional cosmic ray, persistence, or other detector effects for more realism in certain use cases.
-- Debug mode to render e.g. each map colored by a different property (mass, size, redshift) to visually verify the population synthesis and rendering steps.
+- ~~Debug mode to render maps colored by property (mass, size, redshift)~~ DONE — added /api/render/debug endpoint and Debug tab in UI
 - Skip for now: Correlated noise model - e.g. 1/f noise for IR detectors, or spatially varying background due to scattered light. Background noise should be correlated on the scale of the PSF or larger to be realistic, rather than pure pixel-wise Gaussian noise. This could be implemented by generating a noise image with a specified power spectrum and adding it to the final image.
 - ~~Add WCS to the output FITS files so that the images can be easily used in astronomy software.~~ DONE
 - ~~For the API, add endpoints to query the generated catalog for a tile.~~ DONE (existed already)
 - ~~Add WCS overlay to the served images (RA/Dec in cursor info).~~ DONE
 - ~~Buttons to render neighboring tiles~~ DONE — added N/S/E/W pan buttons in the Pointing section that shift RA/Dec by the FoV and re-render.
 - ~~Make hard-coded limits in scripts (e.g. maximum number of galaxies to render) configurable via the config system.~~ DONE
-- Add little projection of the sky in the app corner showing the current tile location.
+- ~~Add little projection of the sky in the app corner showing the current tile location.~~ DONE

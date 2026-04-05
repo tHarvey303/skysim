@@ -50,7 +50,7 @@ def radec_to_thetaphi(ra_deg: np.ndarray, dec_deg: np.ndarray) -> Tuple[np.ndarr
     """Convert (RA, Dec) in degrees to HEALPix (theta, phi) in radians."""
     ra = np.deg2rad(np.asarray(ra_deg, dtype=np.float64))
     dec = np.deg2rad(np.asarray(dec_deg, dtype=np.float64))
-    theta = np.pi / 2.0 - dec
+    theta = np.clip(np.pi / 2.0 - dec, 0.0, np.pi)
     phi = ra % (2.0 * np.pi)
     return theta, phi
 

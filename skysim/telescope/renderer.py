@@ -17,6 +17,7 @@ from skysim.layers.base import Catalog, Layer
 from skysim.models.morphology import (
     STAMP_BUCKETS,
     _assign_bucket,
+    _stamp_sizes_from_sb,
     _stamp_sizes_vectorized,
     add_stamp_to_image,
     add_stamps_scatter,
@@ -254,6 +255,19 @@ def render_image(
     }
 
 
+def _noise_per_pixel(config: SimConfig) -> float:
+    """Estimate the RMS noise floor in electrons/pixel (pre-convolution).
+
+    Combines sky background, dark current, and read noise in quadrature.
+    Used to set the surface-brightness threshold for stamp sizing.
+    """
+    from skysim.telescope.noise import sky_background_rate
+    tel = config.telescope
+    sky_e = sky_background_rate(config.active_filter, tel.pixel_scale) * tel.exposure_time_s
+    dark_e = tel.dark_current_e_s * tel.exposure_time_s
+    return float(jnp.sqrt(sky_e + dark_e + tel.read_noise_e ** 2))
+
+
 def _render_galaxy_catalog(
     image: jnp.ndarray,
     catalog: Catalog,
@@ -281,6 +295,10 @@ def _render_galaxy_catalog(
         log_lnu, z, dl_mpc, float(tel_area), tel.exposure_time_s,
         filter_name=config.active_filter,
     )
+
+    # Surface-brightness threshold for stamp sizing: fraction of the
+    # noise floor so the Sersic cutoff edge is invisible after noise.
+    sb_threshold = _noise_per_pixel(config) * 0.01
 
     # Use the total (composite) R_e for point-source classification
     re_pix = _re_kpc_to_pix(catalog["log_re_kpc"], z, pixel_scale)
@@ -322,12 +340,13 @@ def _render_galaxy_catalog(
     if has_bd:
         image = _render_bulge_disc(
             image, catalog, ridx, z, electrons, px, py,
-            pixel_scale, npix,
+            pixel_scale, npix, sb_threshold,
         )
     else:
         # Fallback: single-component rendering
         image = _render_single_component(
             image, catalog, ridx, re_pix, electrons, px, py,
+            sb_threshold,
         )
 
     return image
@@ -343,6 +362,7 @@ def _render_bulge_disc(
     py: jnp.ndarray,
     pixel_scale: float,
     npix: int,
+    sb_threshold: float = 0.01,
 ) -> jnp.ndarray:
     """Render resolved galaxies as bulge + disc components.
 
@@ -388,8 +408,8 @@ def _render_bulge_disc(
     r_px = all_x[valid_idx]
     r_py = all_y[valid_idx]
 
-    # Compute stamp sizes and render by bucket
-    stamp_sizes = _stamp_sizes_vectorized(r_re, r_n)
+    # Compute stamp sizes from surface-brightness threshold
+    stamp_sizes = _stamp_sizes_from_sb(r_re, r_n, r_flux, sb_threshold)
     buckets = _assign_bucket(stamp_sizes)
 
     for bsize in STAMP_BUCKETS:
@@ -418,6 +438,7 @@ def _render_single_component(
     electrons: jnp.ndarray,
     px: jnp.ndarray,
     py: jnp.ndarray,
+    sb_threshold: float = 0.01,
 ) -> jnp.ndarray:
     """Fallback single-Sersic rendering (no bulge+disc data)."""
     r_n = catalog["sersic_n"][ridx]
@@ -428,7 +449,7 @@ def _render_single_component(
     r_px = px[ridx].astype(jnp.int32)
     r_py = py[ridx].astype(jnp.int32)
 
-    stamp_sizes = _stamp_sizes_vectorized(r_re, r_n)
+    stamp_sizes = _stamp_sizes_from_sb(r_re, r_n, r_flux, sb_threshold)
     buckets = _assign_bucket(stamp_sizes)
 
     for bsize in STAMP_BUCKETS:
@@ -477,3 +498,122 @@ def _render_star_catalog(
         jnp.where(bright_enough, electrons, 0.0),
     )
     return image
+
+
+# ---------------------------------------------------------------------------
+# Debug property maps
+# ---------------------------------------------------------------------------
+
+VALID_DEBUG_PROPERTIES = ["redshift", "mass", "size", "magnitude", "sersic_n"]
+
+
+def render_debug_map(
+    layers: List[Layer],
+    tile: TileInfo,
+    config: SimConfig,
+    property_name: str = "redshift",
+    mag_limit: float = 30.0,
+) -> Dict[str, object]:
+    """Render a debug map colored by a galaxy property.
+
+    Each galaxy is painted onto the image at its position with a value
+    equal to the chosen property. Overlapping pixels use the brightest
+    galaxy's value. Stars are skipped.
+
+    Parameters
+    ----------
+    layers : list of Layer
+    tile : TileInfo
+    config : SimConfig
+    property_name : str
+        One of: "redshift", "mass", "size", "magnitude", "sersic_n".
+    mag_limit : float
+
+    Returns
+    -------
+    dict with "image" (2D array), "vmin", "vmax", "property", "catalogs".
+    """
+    tel = config.telescope
+    npix = tel.npix
+    pixel_scale = tel.pixel_scale
+
+    master = master_key(config.seed)
+    tk = tile_key(master, tile.tile_index)
+    catalogs = {}
+
+    # Generate LSS if configured
+    density_field = None
+    lss_box_mpc = 200.0
+    if "lss" in config.layers:
+        from skysim.layers.lss import growth_factor_approx, zeldovich_displacement
+        lss_key = layer_key(tk, "lss")
+        z_med = float(0.5 * (config.z_min + config.z_max))
+        gf = growth_factor_approx(z_med)
+        density_field = zeldovich_displacement(
+            lss_key, ngrid=64, box_size_mpc=lss_box_mpc, growth_factor=gf,
+        )
+
+    image = jnp.zeros((npix, npix), dtype=jnp.float32)
+
+    for layer in layers:
+        if layer.name != "galaxies":
+            continue
+        lk = layer_key(tk, layer.name)
+        if density_field is not None:
+            catalog = layer.generate_catalog(
+                lk, tile, config,
+                density_field=density_field,
+                density_box_mpc=lss_box_mpc,
+            )
+        else:
+            catalog = layer.generate_catalog(lk, tile, config)
+        catalogs[layer.name] = catalog
+
+        if "mag" not in catalog or len(catalog["mag"]) == 0:
+            continue
+
+        mag = catalog["mag"]
+        bright = mag < mag_limit
+        px, py = _catalog_to_pixel_coords(catalog, npix, pixel_scale)
+
+        # Select the property to map
+        prop_map = {
+            "redshift": catalog.get("z"),
+            "mass": catalog.get("log_mass"),
+            "size": catalog.get("log_re_kpc"),
+            "magnitude": mag,
+            "sersic_n": catalog.get("sersic_n"),
+        }
+        values = prop_map.get(property_name)
+        if values is None:
+            continue
+
+        # Paint galaxies: brighter galaxies overwrite fainter ones
+        # Sort faintest first so bright ones paint on top
+        order = jnp.argsort(-mag)  # faintest first
+        sorted_px = px[order]
+        sorted_py = py[order]
+        sorted_vals = values[order]
+        sorted_bright = bright[order]
+
+        ix = jnp.clip(sorted_px.astype(jnp.int32), 0, npix - 1)
+        iy = jnp.clip(sorted_py.astype(jnp.int32), 0, npix - 1)
+        on_image = (sorted_px >= 0) & (sorted_px < npix) & (sorted_py >= 0) & (sorted_py < npix)
+        mask = sorted_bright & on_image
+
+        # Use scatter to paint values
+        image = image.at[iy, ix].set(
+            jnp.where(mask, sorted_vals, image[iy, ix])
+        )
+
+    valid = image != 0
+    vmin = float(jnp.min(jnp.where(valid, image, jnp.inf))) if jnp.any(valid) else 0.0
+    vmax = float(jnp.max(jnp.where(valid, image, -jnp.inf))) if jnp.any(valid) else 1.0
+
+    return {
+        "image": image,
+        "vmin": vmin,
+        "vmax": vmax,
+        "property": property_name,
+        "catalogs": catalogs,
+    }

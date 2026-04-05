@@ -185,7 +185,11 @@ class GalaxyLayer:
         k_ra, k_dec = jax.random.split(k9)
 
         side_deg = jnp.sqrt(tile.area_arcmin2) / 60.0
-        ra = tile.ra_center + (jax.random.uniform(k_ra, shape=(n_total,)) - 0.5) * side_deg
+        # RA degrees must be wider by 1/cos(dec) so the on-sky angular
+        # extent matches the Dec extent (avoids squishing near poles).
+        cos_dec = jnp.cos(jnp.deg2rad(tile.dec_center))
+        cos_dec = jnp.maximum(cos_dec, 1e-6)  # avoid division by zero at pole
+        ra = tile.ra_center + (jax.random.uniform(k_ra, shape=(n_total,)) - 0.5) * side_deg / cos_dec
         dec = tile.dec_center + (jax.random.uniform(k_dec, shape=(n_total,)) - 0.5) * side_deg
 
         # --- LSS density modulation (acceptance-rejection) ---

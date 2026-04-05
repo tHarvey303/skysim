@@ -1,7 +1,10 @@
 import React from "react";
 import type { TelescopeInfo } from "../api";
 
-export type RenderMode = "single" | "rgb";
+export type RenderMode = "single" | "rgb" | "debug";
+
+export const DEBUG_PROPERTIES = ["redshift", "mass", "size", "magnitude", "sersic_n"] as const;
+export type DebugProperty = typeof DEBUG_PROPERTIES[number];
 
 export interface ControlValues {
   ra: number;
@@ -20,6 +23,7 @@ export interface ControlValues {
   filterR: string;
   filterG: string;
   filterB: string;
+  debugProperty: DebugProperty;
 }
 
 interface Props {
@@ -185,9 +189,27 @@ export default function Controls({
           >
             RGB
           </button>
+          <button
+            className={`mode-tab ${values.mode === "debug" ? "active" : ""}`}
+            onClick={() => set("mode", "debug")}
+          >
+            Debug
+          </button>
         </div>
 
-        {values.mode === "single" ? (
+        {values.mode === "debug" ? (
+          <div className="field">
+            <label>Property</label>
+            <select
+              value={values.debugProperty}
+              onChange={(e) => set("debugProperty", e.target.value as DebugProperty)}
+            >
+              {DEBUG_PROPERTIES.map((p) => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+        ) : values.mode === "single" ? (
           <div className="field">
             <label>Filter</label>
             <select

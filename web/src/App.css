@@ -337,6 +337,20 @@ input[type="range"] {
   font-weight: bold;
 }
 
+.sky-minimap {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 120px;
+  height: 65px;
+  pointer-events: none;
+  opacity: 0.8;
+}
+.sky-minimap svg {
+  width: 100%;
+  height: 100%;
+}
+
 .zoom-display {
   font-size: 11px;
   color: var(--text-secondary);

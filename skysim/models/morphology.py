@@ -183,7 +183,7 @@ def add_stamp_to_image(
 
 # Stamp-size buckets for batching. Galaxies are rounded up to the nearest
 # bucket size so each batch can be vmap'd at a single fixed stamp dimension.
-STAMP_BUCKETS = (17, 33, 65, 129, 257, 513)
+STAMP_BUCKETS = (17, 33, 65, 129, 257, 513, 1025)
 
 
 def _assign_bucket(stamp_sizes: jnp.ndarray) -> jnp.ndarray:
@@ -200,11 +200,62 @@ def _stamp_sizes_vectorized(
     min_size: int = 5,
     max_size: int = 1024,
 ) -> jnp.ndarray:
-    """Vectorized stamp size computation (JAX-compatible)."""
+    """Vectorized stamp size computation (JAX-compatible).
+
+    Fallback when per-galaxy flux is not available. Uses a fixed number
+    of effective radii that depends on Sersic index.
+    """
     n_re = 8.0 + 3.0 * jnp.clip(n - 2.0, 0.0, 6.0)
     size = (2.0 * n_re * r_e_pix + 1).astype(jnp.int32)
     # Force odd
     size = size + 1 - (size % 2)
+    return jnp.clip(size, min_size, max_size)
+
+
+def _stamp_sizes_from_sb(
+    r_e_pix: jnp.ndarray,
+    n: jnp.ndarray,
+    flux: jnp.ndarray,
+    sb_threshold: float,
+    min_size: int = 5,
+    max_size: int = 1024,
+) -> jnp.ndarray:
+    """Compute stamp sizes from a surface-brightness threshold.
+
+    Solves for the radius where the Sersic profile drops below
+    *sb_threshold* (electrons per pixel), so bright galaxies
+    automatically get larger stamps and faint ones get smaller stamps.
+
+    Parameters
+    ----------
+    r_e_pix : array  – half-light radius in pixels
+    n       : array  – Sersic index
+    flux    : array  – total flux in electrons
+    sb_threshold : float – surface-brightness floor (electrons/pixel)
+    """
+    from jax.scipy.special import gammaln
+
+    bn = sersic_bn(n)
+
+    # Central surface brightness I_0 (matching sersic_profile normalisation,
+    # which does not include axis-ratio q):
+    #   I_0 = flux * bn^(2n) / (2*pi*n * r_e^2 * Gamma(2n))
+    log_I0 = (
+        jnp.log(jnp.maximum(flux, 1e-30))
+        + 2.0 * n * jnp.log(bn)
+        - jnp.log(2.0 * jnp.pi * n)
+        - 2.0 * jnp.log(jnp.maximum(r_e_pix, 0.1))
+        - gammaln(2.0 * n)
+    )
+
+    # Solve I(r) = I_0 * exp(-bn * (r/re)^(1/n)) = sb_threshold
+    #   => r/re = (ln(I_0 / threshold) / bn)^n
+    log_ratio = jnp.maximum(log_I0 - jnp.log(sb_threshold), 0.0)
+    r_over_re = (log_ratio / bn) ** n
+    r_over_re = jnp.clip(r_over_re, 4.0, 200.0)
+
+    size = (2.0 * r_over_re * r_e_pix + 1).astype(jnp.int32)
+    size = size + 1 - (size % 2)  # force odd
     return jnp.clip(size, min_size, max_size)
 
 
