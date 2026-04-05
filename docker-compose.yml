@@ -1,11 +1,25 @@
 services:
   skysim:
     build: .
-    ports:
-      - "8000:8000"
     environment:
       - JAX_PLATFORM_NAME=cpu
     # Mount data directory if you have precomputed tables locally
     volumes:
       - ./skysim/data:/app/skysim/data:ro
     restart: unless-stopped
+    networks:
+      - default        # Internal network for DB access
+      - traefik_network # External network for Traefik access
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik_network"
+      - "traefik.http.routers.skysim.rule=Host(`skysim.tharvey.space`)"
+      - "traefik.http.routers.skysim.entrypoints=websecure"
+      - "traefik.http.routers.skysim.tls=true"
+      # Replace 'myresolver' with your actual cert resolver name from traefik.toml/yaml
+      - "traefik.http.routers.skysim.tls.certresolver=letsencrypt"
+      - "traefik.http.services.skysim.loadbalancer.server.port=8000"
+
+networks:
+  traefik_network:
+    external: true
