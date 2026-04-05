@@ -152,9 +152,32 @@ def render_image(
     catalogs = {}
     noiseless = jnp.zeros((npix, npix), dtype=jnp.float32)
 
+    # --- Generate LSS density field if requested ---
+    density_field = None
+    lss_box_mpc = 200.0
+    if "lss" in config.layers:
+        from skysim.layers.lss import growth_factor_approx, zeldovich_displacement
+        lss_key = layer_key(tk, "lss")
+        # Use growth factor at median redshift
+        z_med = float(0.5 * (config.z_min + config.z_max))
+        gf = growth_factor_approx(z_med)
+        density_field = zeldovich_displacement(
+            lss_key, ngrid=64, box_size_mpc=lss_box_mpc, growth_factor=gf,
+        )
+
     for layer in layers:
         lk = layer_key(tk, layer.name)
-        catalog = layer.generate_catalog(lk, tile, config)
+
+        # Pass density field to galaxy layer
+        if hasattr(layer, 'name') and layer.name == "galaxies" and density_field is not None:
+            catalog = layer.generate_catalog(
+                lk, tile, config,
+                density_field=density_field,
+                density_box_mpc=lss_box_mpc,
+            )
+        else:
+            catalog = layer.generate_catalog(lk, tile, config)
+
         catalogs[layer.name] = catalog
 
         if "mag" not in catalog or len(catalog["mag"]) == 0:
@@ -193,9 +216,9 @@ def _render_galaxy_catalog(
 ) -> jnp.ndarray:
     """Render galaxies from a catalog onto the image.
 
-    Point sources (~90% of objects) are batched into a single
-    vectorized scatter-add. Only resolved galaxies are rendered
-    individually with Sersic stamps.
+    For each resolved galaxy, renders separate bulge and disc Sersic
+    components when bulge_to_total data is available. Point-source
+    galaxies (~90%) are batched into a single scatter-add.
     """
     tel = config.telescope
     npix = tel.npix
@@ -211,6 +234,7 @@ def _render_galaxy_catalog(
         log_lnu, z, dl_mpc, float(tel_area), tel.exposure_time_s,
     )
 
+    # Use the total (composite) R_e for point-source classification
     re_pix = _re_kpc_to_pix(catalog["log_re_kpc"], z, pixel_scale)
     px, py = _catalog_to_pixel_coords(catalog, npix, pixel_scale)
     is_point = is_point_source(re_pix, psf_fwhm_pix) | (re_pix < 1.0)
@@ -225,9 +249,8 @@ def _render_galaxy_catalog(
         jnp.where(point_mask, electrons, 0.0),
     )
 
-    # --- Render resolved galaxies (batched by stamp-size bucket) ---
+    # --- Render resolved galaxies (bulge + disc components) ---
     resolved_mask = (~is_point) & bright_enough
-    # Also exclude off-image and zero-flux sources
     on_image = (px > -50) & (px < npix + 50) & (py > -50) & (py < npix + 50)
     resolved_mask = resolved_mask & on_image & (electrons > 0)
 
@@ -243,9 +266,111 @@ def _render_galaxy_catalog(
         resolved_mask = resolved_mask & (mag <= cutoff_mag)
         n_resolved = min(n_resolved, 20000)
 
-    # Extract resolved galaxy properties
     ridx = jnp.where(resolved_mask, size=n_resolved, fill_value=0)[0]
 
+    # Check if bulge+disc data is available
+    has_bd = "bulge_to_total" in catalog and "log_re_bulge_kpc" in catalog
+    if has_bd:
+        image = _render_bulge_disc(
+            image, catalog, ridx, z, electrons, px, py,
+            pixel_scale, npix,
+        )
+    else:
+        # Fallback: single-component rendering
+        image = _render_single_component(
+            image, catalog, ridx, re_pix, electrons, px, py,
+        )
+
+    return image
+
+
+def _render_bulge_disc(
+    image: jnp.ndarray,
+    catalog: Catalog,
+    ridx: jnp.ndarray,
+    z: jnp.ndarray,
+    electrons: jnp.ndarray,
+    px: jnp.ndarray,
+    py: jnp.ndarray,
+    pixel_scale: float,
+    npix: int,
+) -> jnp.ndarray:
+    """Render resolved galaxies as bulge + disc components.
+
+    Creates two entries per galaxy (bulge and disc) and renders them
+    together through the batched stamp pipeline.
+    """
+    bt = catalog["bulge_to_total"][ridx]
+    pa = catalog["pa"][ridx]
+    flux = electrons[ridx]
+    x = px[ridx].astype(jnp.int32)
+    y = py[ridx].astype(jnp.int32)
+
+    # --- Bulge parameters ---
+    re_bulge_pix = _re_kpc_to_pix(catalog["log_re_bulge_kpc"][ridx], z[ridx], pixel_scale)
+    n_bulge = jnp.full(len(ridx), 4.0)  # de Vaucouleurs
+    q_bulge = catalog["axis_ratio_bulge"][ridx]
+    flux_bulge = flux * bt
+
+    # --- Disc parameters ---
+    re_disc_pix = _re_kpc_to_pix(catalog["log_re_disc_kpc"][ridx], z[ridx], pixel_scale)
+    n_disc = jnp.full(len(ridx), 1.0)  # exponential
+    q_disc = catalog["axis_ratio"][ridx]
+    flux_disc = flux * (1.0 - bt)
+
+    # Concatenate bulge and disc into a single batch
+    all_n = jnp.concatenate([n_bulge, n_disc])
+    all_re = jnp.concatenate([re_bulge_pix, re_disc_pix])
+    all_q = jnp.concatenate([q_bulge, q_disc])
+    all_pa = jnp.concatenate([pa, pa])
+    all_flux = jnp.concatenate([flux_bulge, flux_disc])
+    all_x = jnp.concatenate([x, x])
+    all_y = jnp.concatenate([y, y])
+
+    # Filter out zero-flux components (e.g. B/T=0 means no bulge)
+    valid = all_flux > 0
+    valid_idx = jnp.where(valid, size=int(jnp.sum(valid)), fill_value=0)[0]
+
+    r_n = all_n[valid_idx]
+    r_re = all_re[valid_idx]
+    r_q = all_q[valid_idx]
+    r_pa = all_pa[valid_idx]
+    r_flux = all_flux[valid_idx]
+    r_px = all_x[valid_idx]
+    r_py = all_y[valid_idx]
+
+    # Compute stamp sizes and render by bucket
+    stamp_sizes = _stamp_sizes_vectorized(r_re, r_n)
+    buckets = _assign_bucket(stamp_sizes)
+
+    for bsize in STAMP_BUCKETS:
+        bmask = buckets == bsize
+        n_in_bucket = int(jnp.sum(bmask))
+        if n_in_bucket == 0:
+            continue
+
+        bidx = jnp.where(bmask, size=n_in_bucket, fill_value=0)[0]
+        stamps = make_sersic_stamps_batch(
+            r_n[bidx], r_re[bidx], r_q[bidx], r_pa[bidx],
+            r_flux[bidx], bsize,
+        )
+        image = add_stamps_scatter(
+            image, stamps, bsize, r_px[bidx], r_py[bidx],
+        )
+
+    return image
+
+
+def _render_single_component(
+    image: jnp.ndarray,
+    catalog: Catalog,
+    ridx: jnp.ndarray,
+    re_pix: jnp.ndarray,
+    electrons: jnp.ndarray,
+    px: jnp.ndarray,
+    py: jnp.ndarray,
+) -> jnp.ndarray:
+    """Fallback single-Sersic rendering (no bulge+disc data)."""
     r_n = catalog["sersic_n"][ridx]
     r_q = catalog["axis_ratio"][ridx]
     r_pa = catalog["pa"][ridx]
@@ -254,11 +379,9 @@ def _render_galaxy_catalog(
     r_px = px[ridx].astype(jnp.int32)
     r_py = py[ridx].astype(jnp.int32)
 
-    # Compute stamp sizes and assign to buckets
     stamp_sizes = _stamp_sizes_vectorized(r_re, r_n)
     buckets = _assign_bucket(stamp_sizes)
 
-    # Render each bucket with vmap + scatter-add
     for bsize in STAMP_BUCKETS:
         bmask = buckets == bsize
         n_in_bucket = int(jnp.sum(bmask))
@@ -297,7 +420,6 @@ def _render_star_catalog(
     px, py = _catalog_to_pixel_coords(catalog, npix, tel.pixel_scale)
     bright_enough = mag < mag_limit
 
-    # Batch render all stars at once
     image = add_point_sources_batch(
         image,
         jnp.where(bright_enough, px, -1.0),

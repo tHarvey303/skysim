@@ -121,7 +121,7 @@ def stamp_size_for_galaxy(
     r_e_pix: float,
     n: float,
     min_size: int = 5,
-    max_size: int = 512,
+    max_size: int = 1024,
 ) -> int:
     """Choose stamp size based on galaxy size and profile shape.
 
@@ -198,7 +198,7 @@ def _stamp_sizes_vectorized(
     r_e_pix: jnp.ndarray,
     n: jnp.ndarray,
     min_size: int = 5,
-    max_size: int = 512,
+    max_size: int = 1024,
 ) -> jnp.ndarray:
     """Vectorized stamp size computation (JAX-compatible)."""
     n_re = 8.0 + 3.0 * jnp.clip(n - 2.0, 0.0, 6.0)

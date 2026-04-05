@@ -154,6 +154,12 @@ def _do_render(
 
     return result, config, tile, dt, n_gal, n_star
 
+# ---------------------------------------------------------------------------
+# API Router
+# ---------------------------------------------------------------------------
+
+api = APIRouter(prefix="/api")
+
 
 @api.get("/psfs")
 def list_psfs():
@@ -162,11 +168,6 @@ def list_psfs():
     return {"psfs": list_available_psfs()}
 
 
-# ---------------------------------------------------------------------------
-# API Router
-# ---------------------------------------------------------------------------
-
-api = APIRouter(prefix="/api")
 
 
 @api.get("/health")

@@ -65,3 +65,11 @@ def angular_diameter_distances(z: np.ndarray) -> np.ndarray:
 def angular_diameter_distances_jax(z: jnp.ndarray) -> jnp.ndarray:
     """Angular diameter distances in Mpc using JAX interpolation."""
     return jnp.interp(z, _Z_TABLE_J, _DA_TABLE_J)
+
+
+_DC_TABLE_J = jnp.array(_DC_TABLE, dtype=jnp.float32)
+
+
+def comoving_distances_jax(z: jnp.ndarray) -> jnp.ndarray:
+    """Comoving distances in Mpc using JAX interpolation."""
+    return jnp.interp(z, _Z_TABLE_J, _DC_TABLE_J)

@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--psf-fwhm", type=float, default=0.1, help="PSF FWHM (arcsec)")
     parser.add_argument("--output", type=str, default="skysim_demo.fits")
     parser.add_argument("--no-stars", action="store_true")
+    parser.add_argument("--lss", action="store_true", help="Enable LSS density modulation")
     args = parser.parse_args()
 
     from skysim.config import (
@@ -47,11 +48,18 @@ def main():
     }
     telescope = presets[args.telescope]
 
+    active_layers = ["galaxies"]
+    if not args.no_stars:
+        active_layers.append("stars")
+    if args.lss:
+        active_layers.append("lss")
+
     config = SimConfig(
         seed=args.seed,
         nside=args.nside,
         telescope=telescope,
         active_filter=args.filter,
+        layers=active_layers,
     )
 
     tile_idx = radec_to_tile(config.nside, args.ra, args.dec)

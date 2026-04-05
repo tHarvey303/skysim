@@ -85,9 +85,26 @@ def generate_gaussian_field(
     k_mag = jnp.sqrt(kx3d**2 + ky3d**2 + kz3d**2)
     k_mag = jnp.maximum(k_mag, dk)  # avoid k=0
 
-    # Power spectrum amplitude
-    Pk = cdm_power_spectrum(k_mag)
-    amplitude = jnp.sqrt(Pk * (box_size_mpc / ngrid) ** 3)
+    # Power spectrum shape (unnormalised)
+    Pk_shape = cdm_power_spectrum(k_mag)
+
+    # Normalise to sigma8: compute the raw variance and rescale so that
+    # the field smoothed with a top-hat of R=8 Mpc/h has variance sigma8^2.
+    # Approximation: rescale the total variance to give sigma8 ≈ 0.8.
+    sigma8 = 0.8
+    V_cell = (box_size_mpc / ngrid) ** 3
+    # Top-hat window in k-space: W(kR) = 3*(sin(kR)-kR*cos(kR))/(kR)^3
+    R8 = 8.0  # Mpc/h
+    kR = k_mag * R8
+    W = 3.0 * (jnp.sin(kR) - kR * jnp.cos(kR)) / jnp.maximum(kR**3, 1e-30)
+    W = jnp.where(kR < 0.01, 1.0, W)  # limit W→1 as kR→0
+    # Raw variance from unnormalised P(k)
+    var_raw = jnp.sum(Pk_shape * W**2) * dk**3 / (2 * jnp.pi)**3
+    # Normalisation factor
+    norm = sigma8**2 / jnp.maximum(var_raw, 1e-30)
+
+    Pk = Pk_shape * norm
+    amplitude = jnp.sqrt(Pk * V_cell)
 
     # Random phases
     k1, k2 = jax.random.split(key)
