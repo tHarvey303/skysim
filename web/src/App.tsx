@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  downloadFits,
   fetchFilters,
   fetchTelescopes,
   renderRaw,
@@ -53,6 +54,9 @@ export default function App() {
   const [imgWidth, setImgWidth] = useState(0);
   const [imgHeight, setImgHeight] = useState(0);
 
+  // WCS info for cursor RA/Dec display
+  const [wcsInfo, setWcsInfo] = useState<{ raCenter: number; decCenter: number; pixelScale: number } | null>(null);
+
   // Load filters and telescopes on mount
   useEffect(() => {
     fetchFilters().then(setFilters).catch(console.error);
@@ -90,6 +94,7 @@ export default function App() {
         setBData(null);
         setImgWidth(result.width);
         setImgHeight(result.height);
+        setWcsInfo({ raCenter: result.raCenter, decCenter: result.decCenter, pixelScale: result.pixelScale });
         setStats({
           renderTime: result.renderTime,
           galaxyCount: result.galaxyCount,
@@ -111,6 +116,7 @@ export default function App() {
         setBData(bResult.data);
         setImgWidth(rResult.width);
         setImgHeight(rResult.height);
+        setWcsInfo({ raCenter: rResult.raCenter, decCenter: rResult.decCenter, pixelScale: rResult.pixelScale });
         setStats({
           renderTime: totalTime,
           galaxyCount: rResult.galaxyCount,
@@ -123,6 +129,29 @@ export default function App() {
       setError(msg);
     } finally {
       setLoading(false);
+    }
+  }, [controls]);
+
+  const handleDownloadFits = useCallback(async () => {
+    const baseParams = {
+      ra: controls.ra,
+      dec: controls.dec,
+      seed: controls.seed,
+      telescope: controls.telescope,
+      nside: controls.nside,
+      fov_arcmin: controls.fovArcmin,
+      exposure_time_s: controls.exposureTimeS,
+      mag_limit: controls.magLimit,
+      psf_fwhm: controls.psfFwhm,
+      psf_type: controls.psfType,
+      include_stars: controls.includeStars,
+      filter_code: controls.mode === "single" ? controls.filter : controls.filterG,
+    };
+    try {
+      await downloadFits(baseParams);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
     }
   }, [controls]);
 
@@ -192,6 +221,8 @@ export default function App() {
             width={imgWidth}
             height={imgHeight}
             isRgb={controls.mode === "rgb"}
+            onDownloadFits={handleDownloadFits}
+            wcsInfo={wcsInfo}
           />
         </div>
       </div>

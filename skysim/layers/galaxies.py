@@ -80,7 +80,8 @@ class GalaxyLayer:
             Side length of the density field box in Mpc/h.
         """
         z_edges = np.array(config.redshift_bin_edges)
-        log_m_min = 7.0
+        log_m_min = config.mass_function.log_m_min
+        log_m_max = config.mass_function.log_m_max
 
         # --- Pass 1: count galaxies per redshift bin ---
         counts_per_bin = []
@@ -120,7 +121,7 @@ class GalaxyLayer:
             params = weaver23_params(z_mid)
 
             from skysim.models.schechter import _build_cdf
-            log_m_grid, cdf = _build_cdf(log_m_min, 12.5, params)
+            log_m_grid, cdf = _build_cdf(log_m_min, log_m_max, params)
             masses_i = jnp.interp(u_mass[offset:offset + n_i], cdf, log_m_grid)
             log_mass = log_mass.at[offset:offset + n_i].set(masses_i)
 
@@ -138,7 +139,7 @@ class GalaxyLayer:
         is_late_type = jax.random.uniform(k3, shape=log_mass.shape) < f_late
 
         # Sizes
-        log_re = sample_sizes(k4, log_mass, z, is_late_type)
+        log_re = sample_sizes(k4, log_mass, z, is_late_type, cfg=config.mass_size)
 
         # Metallicities
         metallicity = sample_metallicities(k5, log_mass, z)

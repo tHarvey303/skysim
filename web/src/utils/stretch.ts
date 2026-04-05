@@ -26,15 +26,16 @@ export function percentile(data: Float32Array, p: number): number {
 
 /**
  * Apply stretch to a single value (already normalized to [0, 1]).
+ * @param asinhAlpha - softening parameter for asinh stretch (higher = more contrast)
  */
-function stretchValue(v: number, type: StretchType): number {
+function stretchValue(v: number, type: StretchType, asinhAlpha: number = 10): number {
   switch (type) {
     case "sqrt":
       return Math.sqrt(v);
     case "log":
       return Math.log10(1 + 9 * v);
     case "asinh":
-      return Math.asinh(v * 10) / Math.asinh(10);
+      return Math.asinh(v * asinhAlpha) / Math.asinh(asinhAlpha);
     case "power":
       return v * v;
     default:
@@ -83,7 +84,8 @@ export function stretchToImageData(
   pmin: number,
   pmax: number,
   colormap: ColormapType,
-  invert: boolean
+  invert: boolean,
+  asinhAlpha: number = 10
 ): ImageData {
   const vmin = percentile(data, pmin);
   const vmax = percentile(data, pmax);
@@ -93,7 +95,7 @@ export function stretchToImageData(
   for (let i = 0; i < data.length; i++) {
     let v = (data[i] - vmin) / range;
     v = Math.max(0, Math.min(1, v));
-    v = stretchValue(v, stretch);
+    v = stretchValue(v, stretch, asinhAlpha);
     if (invert) v = 1 - v;
     const [r, g, b] = applyColormap(v, colormap);
     const j = i * 4;
@@ -117,7 +119,8 @@ export function rgbToImageData(
   stretch: StretchType,
   pmin: number,
   pmax: number,
-  invert: boolean
+  invert: boolean,
+  asinhAlpha: number = 10
 ): ImageData {
   const rMin = percentile(rData, pmin);
   const rMax = percentile(rData, pmax);
@@ -131,9 +134,9 @@ export function rgbToImageData(
     let r = (rData[i] - rMin) / (rMax - rMin || 1);
     let g = (gData[i] - gMin) / (gMax - gMin || 1);
     let b = (bData[i] - bMin) / (bMax - bMin || 1);
-    r = stretchValue(Math.max(0, Math.min(1, r)), stretch);
-    g = stretchValue(Math.max(0, Math.min(1, g)), stretch);
-    b = stretchValue(Math.max(0, Math.min(1, b)), stretch);
+    r = stretchValue(Math.max(0, Math.min(1, r)), stretch, asinhAlpha);
+    g = stretchValue(Math.max(0, Math.min(1, g)), stretch, asinhAlpha);
+    b = stretchValue(Math.max(0, Math.min(1, b)), stretch, asinhAlpha);
     if (invert) { r = 1 - r; g = 1 - g; b = 1 - b; }
     const j = i * 4;
     rgba[j] = r * 255;

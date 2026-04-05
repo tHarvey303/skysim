@@ -2,22 +2,31 @@
 
 Assigns half-light radii to galaxies based on stellar mass, redshift,
 and morphological type (early/late), with log-normal scatter.
+
+Parameters can be overridden via ``MassSizeConfig`` in the simulation
+config.
 """
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import jax
 import jax.numpy as jnp
+
+if TYPE_CHECKING:
+    from skysim.config import MassSizeConfig
 
 
 def log_re_mean(
     log_mass: jnp.ndarray,
     z: jnp.ndarray,
     is_late_type: jnp.ndarray,
+    cfg: "MassSizeConfig | None" = None,
 ) -> jnp.ndarray:
     """Mean log10(R_e / kpc) from van der Wel+14 Eq. 2.
 
-    log10(R_e) = log10(A) + beta * (log10(M) - 10.7)
+    log10(R_e) = log10(A) + beta * (log10(M) - mass_pivot)
 
     where A and beta depend on morphological type and evolve with redshift.
 
@@ -29,25 +38,30 @@ def log_re_mean(
         Redshift.
     is_late_type : array (bool or 0/1)
         True for late-type (disc-dominated), False for early-type.
+    cfg : MassSizeConfig, optional
+        Override default van der Wel+14 parameters.
 
     Returns
     -------
     log_re : array
         log10(R_e / kpc).
     """
-    # van der Wel+14 Table 1: A(z) = A0 * (1+z)^gamma, beta = const
+    if cfg is None:
+        from skysim.config import MassSizeConfig
+        cfg = MassSizeConfig()
+
     # Late-type
-    log_A_late = jnp.log10(6.13) + (-0.37) * jnp.log10(1.0 + z)
-    beta_late = 0.22 * jnp.ones_like(z)
+    log_A_late = jnp.log10(cfg.A0_late) + cfg.gamma_late * jnp.log10(1.0 + z)
+    beta_late = cfg.beta_late * jnp.ones_like(z)
 
     # Early-type
-    log_A_early = jnp.log10(4.22) + (-0.70) * jnp.log10(1.0 + z)
-    beta_early = 0.76 * jnp.ones_like(z)
+    log_A_early = jnp.log10(cfg.A0_early) + cfg.gamma_early * jnp.log10(1.0 + z)
+    beta_early = cfg.beta_early * jnp.ones_like(z)
 
     log_A = jnp.where(is_late_type, log_A_late, log_A_early)
     beta = jnp.where(is_late_type, beta_late, beta_early)
 
-    log_re = log_A + beta * (log_mass - 10.7)
+    log_re = log_A + beta * (log_mass - cfg.mass_pivot)
     return log_re
 
 
@@ -56,7 +70,8 @@ def sample_sizes(
     log_mass: jnp.ndarray,
     z: jnp.ndarray,
     is_late_type: jnp.ndarray,
-    scatter_dex: float = 0.15,
+    scatter_dex: float | None = None,
+    cfg: "MassSizeConfig | None" = None,
 ) -> jnp.ndarray:
     """Sample half-light radii with log-normal scatter.
 
@@ -70,14 +85,22 @@ def sample_sizes(
         Redshift.
     is_late_type : array (bool or 0/1)
         Morphological type flag.
-    scatter_dex : float
-        Log-normal scatter in dex (default 0.15 per van der Wel+14).
+    scatter_dex : float, optional
+        Log-normal scatter in dex. If None, uses ``cfg.scatter_dex``.
+    cfg : MassSizeConfig, optional
+        Override default parameters.
 
     Returns
     -------
     log_re : array
         log10(R_e / kpc) with scatter applied.
     """
-    mean = log_re_mean(log_mass, z, is_late_type)
+    if cfg is None:
+        from skysim.config import MassSizeConfig
+        cfg = MassSizeConfig()
+    if scatter_dex is None:
+        scatter_dex = cfg.scatter_dex
+
+    mean = log_re_mean(log_mass, z, is_late_type, cfg=cfg)
     noise = scatter_dex * jax.random.normal(key, shape=log_mass.shape)
     return mean + noise

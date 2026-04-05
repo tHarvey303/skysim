@@ -22,6 +22,9 @@ export interface RawImageResult {
   renderTime: number;
   galaxyCount: number;
   starCount: number;
+  raCenter: number;
+  decCenter: number;
+  pixelScale: number;
 }
 
 export interface TelescopeInfo {
@@ -69,9 +72,30 @@ export async function renderRaw(params: RenderParams): Promise<RawImageResult> {
   const renderTime = parseFloat(res.headers.get("X-Render-Time") || "0");
   const galaxyCount = parseInt(res.headers.get("X-Galaxy-Count") || "0", 10);
   const starCount = parseInt(res.headers.get("X-Star-Count") || "0", 10);
+  const raCenter = parseFloat(res.headers.get("X-RA-Center") || "0");
+  const decCenter = parseFloat(res.headers.get("X-Dec-Center") || "0");
+  const pixelScale = parseFloat(res.headers.get("X-Pixel-Scale") || "0");
 
   const buf = await res.arrayBuffer();
   const data = new Float32Array(buf);
 
-  return { data, width, height, renderTime, galaxyCount, starCount };
+  return { data, width, height, renderTime, galaxyCount, starCount, raCenter, decCenter, pixelScale };
+}
+
+export async function downloadFits(params: RenderParams): Promise<void> {
+  const qs = buildQuery(params as unknown as Record<string, unknown>);
+  const res = await fetch(`${BASE}/render/fits?${qs}`);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`FITS download failed: ${res.status} ${text}`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  const disposition = res.headers.get("Content-Disposition");
+  const match = disposition?.match(/filename=(.+)/);
+  link.download = match ? match[1] : "skysim.fits";
+  link.click();
+  URL.revokeObjectURL(url);
 }

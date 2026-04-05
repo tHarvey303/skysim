@@ -56,6 +56,38 @@ class DustConfig:
 
 
 @dataclass
+class MassSizeConfig:
+    """Mass-size relation parameters (van der Wel+14 style).
+
+    log10(R_e) = log10(A0 * (1+z)^gamma) + beta * (log10(M) - mass_pivot)
+    """
+    # Late-type (disc-dominated)
+    A0_late: float = 6.13
+    gamma_late: float = -0.37
+    beta_late: float = 0.22
+    # Early-type (elliptical/bulge-dominated)
+    A0_early: float = 4.22
+    gamma_early: float = -0.70
+    beta_early: float = 0.76
+    # Common
+    mass_pivot: float = 10.7       # log10(M/Msun) pivot mass
+    scatter_dex: float = 0.15      # log-normal scatter
+
+
+@dataclass
+class SchechterConfig:
+    """Schechter mass function configuration.
+
+    Controls the mass range used for sampling and the model used
+    for parameters. The actual Schechter parameters (phi*, M*, alpha)
+    are looked up per redshift bin from the chosen model.
+    """
+    model: str = "weaver23"        # parameter set: "weaver23" (only option for now)
+    log_m_min: float = 7.0         # minimum log10(M/Msun)
+    log_m_max: float = 12.5        # maximum log10(M/Msun)
+
+
+@dataclass
 class SimConfig:
     """Top-level simulation configuration."""
     seed: int = 42
@@ -67,6 +99,9 @@ class SimConfig:
     dust: DustConfig = field(default_factory=DustConfig)
     layers: List[str] = field(default_factory=lambda: ["galaxies", "stars"])
     active_filter: str = "JWST/NIRCam.F200W"
+    max_resolved_galaxies: int = 20000
+    mass_function: SchechterConfig = field(default_factory=SchechterConfig)
+    mass_size: MassSizeConfig = field(default_factory=MassSizeConfig)
 
     @property
     def redshift_bin_edges(self):
@@ -86,7 +121,7 @@ JWST_NIRCAM = TelescopeConfig(
     aperture_m=6.5,
     read_noise_e=6.0,
     dark_current_e_s=0.003,
-    exposure_time_s=1000.0,
+    exposure_time_s=36000.0,
 )
 
 HST_ACS = TelescopeConfig(

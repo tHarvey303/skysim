@@ -198,7 +198,7 @@ def render_image(
 
     # Add noise
     noise_key = jax.random.fold_in(tk, 999)
-    noisy = add_noise(noise_key, convolved, tel, config.active_filter)
+    noisy = add_noise(noise_key, convolved, tel, config.active_filter, psf_fwhm_arcsec)
 
     return {
         "noiseless": convolved,
@@ -258,13 +258,14 @@ def _render_galaxy_catalog(
     if n_resolved == 0:
         return image
 
-    # Cap at 20K resolved galaxies (brightest first)
-    if n_resolved > 20000:
+    # Cap resolved galaxies (brightest first)
+    max_resolved = config.max_resolved_galaxies
+    if n_resolved > max_resolved:
         resolved_mags = jnp.where(resolved_mask, mag, 99.0)
         order = jnp.argsort(resolved_mags)
-        cutoff_mag = float(mag[order[19999]])
+        cutoff_mag = float(mag[order[max_resolved - 1]])
         resolved_mask = resolved_mask & (mag <= cutoff_mag)
-        n_resolved = min(n_resolved, 20000)
+        n_resolved = min(n_resolved, max_resolved)
 
     ridx = jnp.where(resolved_mask, size=n_resolved, fill_value=0)[0]
 

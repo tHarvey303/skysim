@@ -6,6 +6,12 @@ import {
   type ColormapType,
 } from "../utils/stretch";
 
+export interface WcsInfo {
+  raCenter: number;
+  decCenter: number;
+  pixelScale: number; // arcsec/pixel
+}
+
 interface Props {
   /** Single-band image data (mutually exclusive with rgb*). */
   imageData: Float32Array | null;
@@ -16,6 +22,8 @@ interface Props {
   width: number;
   height: number;
   isRgb: boolean;
+  onDownloadFits?: () => void;
+  wcsInfo?: WcsInfo | null;
 }
 
 export default function ImageViewer({
@@ -26,6 +34,8 @@ export default function ImageViewer({
   width,
   height,
   isRgb,
+  onDownloadFits,
+  wcsInfo,
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -43,6 +53,9 @@ export default function ImageViewer({
   const [colormap, setColormap] = useState<ColormapType>("grayscale");
   const [invert, setInvert] = useState(false);
 
+  // Asinh softening
+  const [asinhAlpha, setAsinhAlpha] = useState(10);
+
   // Cursor info
   const [cursorInfo, setCursorInfo] = useState("");
 
@@ -52,9 +65,9 @@ export default function ImageViewer({
 
     let imgData: ImageData | null = null;
     if (isRgb && rData && gData && bData) {
-      imgData = rgbToImageData(rData, gData, bData, width, height, stretch, pmin, pmax, invert);
+      imgData = rgbToImageData(rData, gData, bData, width, height, stretch, pmin, pmax, invert, asinhAlpha);
     } else if (imageData) {
-      imgData = stretchToImageData(imageData, width, height, stretch, pmin, pmax, colormap, invert);
+      imgData = stretchToImageData(imageData, width, height, stretch, pmin, pmax, colormap, invert, asinhAlpha);
     }
     if (!imgData) return;
 
@@ -66,7 +79,7 @@ export default function ImageViewer({
     off.height = height;
     const ctx = off.getContext("2d")!;
     ctx.putImageData(imgData, 0, 0);
-  }, [imageData, rData, gData, bData, width, height, stretch, pmin, pmax, colormap, invert, isRgb]);
+  }, [imageData, rData, gData, bData, width, height, stretch, pmin, pmax, colormap, invert, isRgb, asinhAlpha]);
 
   // Draw offscreen canvas to visible canvas with pan/zoom
   const draw = useCallback(() => {
@@ -91,7 +104,7 @@ export default function ImageViewer({
 
   useEffect(() => {
     draw();
-  }, [draw, imageData, rData, gData, bData, stretch, pmin, pmax, colormap, invert]);
+  }, [draw, imageData, rData, gData, bData, stretch, pmin, pmax, colormap, invert, asinhAlpha]);
 
   // Fit image on first load or when image changes
   useEffect(() => {
@@ -137,7 +150,16 @@ export default function ImageViewer({
         const idx = imgY * width + imgX;
         const src = isRgb ? rData : imageData;
         const val = src ? src[idx] : 0;
-        setCursorInfo(`(${imgX}, ${imgY})  val=${val.toExponential(2)}`);
+        let info = `(${imgX}, ${imgY})  val=${val.toExponential(2)}`;
+        if (wcsInfo && wcsInfo.pixelScale > 0) {
+          const dxArcsec = (imgX - width / 2) * wcsInfo.pixelScale;
+          const dyArcsec = (imgY - height / 2) * wcsInfo.pixelScale;
+          const decRad = (wcsInfo.decCenter * Math.PI) / 180;
+          const ra = wcsInfo.raCenter - dxArcsec / 3600 / Math.cos(decRad);
+          const dec = wcsInfo.decCenter + dyArcsec / 3600;
+          info += `  RA=${ra.toFixed(5)} Dec=${dec.toFixed(5)}`;
+        }
+        setCursorInfo(info);
       } else {
         setCursorInfo("");
       }
@@ -176,6 +198,15 @@ export default function ImageViewer({
 
   const hasImage = isRgb ? (rData && gData && bData) : imageData;
 
+  const downloadPng = () => {
+    const off = offscreenRef.current;
+    if (!off) return;
+    const link = document.createElement("a");
+    link.download = "skysim.png";
+    link.href = off.toDataURL("image/png");
+    link.click();
+  };
+
   return (
     <div className="main">
       <div
@@ -200,6 +231,14 @@ export default function ImageViewer({
             <span className="zoom-display">
               {(zoom * 100).toFixed(0)}%
             </span>
+            <button className="btn btn-small" onClick={downloadPng} title="Download PNG">
+              PNG
+            </button>
+            {onDownloadFits && (
+              <button className="btn btn-small" onClick={onDownloadFits} title="Download FITS">
+                FITS
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -216,6 +255,21 @@ export default function ImageViewer({
           <option value="asinh">Asinh</option>
           <option value="power">Power</option>
         </select>
+
+        {stretch === "asinh" && (
+          <>
+            <label>Softening</label>
+            <input
+              type="range"
+              min="1"
+              max="100"
+              step="1"
+              value={asinhAlpha}
+              onChange={(e) => setAsinhAlpha(parseFloat(e.target.value))}
+            />
+            <span className="range-value">{asinhAlpha}</span>
+          </>
+        )}
 
         <label>Min %</label>
         <input

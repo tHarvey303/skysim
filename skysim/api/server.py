@@ -54,7 +54,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Image-Width", "X-Image-Height", "X-Render-Time",
-                     "X-Galaxy-Count", "X-Star-Count"],
+                     "X-Galaxy-Count", "X-Star-Count",
+                     "X-RA-Center", "X-Dec-Center", "X-Pixel-Scale"],
 )
 
 # ---------------------------------------------------------------------------
@@ -248,6 +249,9 @@ def render_raw(
             "X-Render-Time": f"{dt:.2f}",
             "X-Galaxy-Count": str(n_gal),
             "X-Star-Count": str(n_star),
+            "X-RA-Center": f"{tile.ra_center:.6f}",
+            "X-Dec-Center": f"{tile.dec_center:.6f}",
+            "X-Pixel-Scale": f"{config.telescope.pixel_scale:.6f}",
         },
     )
 
@@ -286,6 +290,71 @@ def render_png(
         buf,
         media_type="image/png",
         headers={
+            "X-Render-Time": f"{dt:.2f}",
+            "X-Galaxy-Count": str(n_gal),
+            "X-Star-Count": str(n_star),
+        },
+    )
+
+
+@api.get("/render/fits")
+def render_fits(
+    ra: float = _Q_RA,
+    dec: float = _Q_DEC,
+    seed: int = _Q_SEED,
+    telescope: str = _Q_TEL,
+    filter_code: str = _Q_FILTER,
+    nside: int = _Q_NSIDE,
+    fov_arcmin: Optional[float] = _Q_FOV,
+    exposure_time_s: Optional[float] = _Q_EXP,
+    mag_limit: float = _Q_MAG,
+    psf_fwhm: float = _Q_PSF,
+    psf_type: str = _Q_PSF_TYPE,
+    include_stars: bool = _Q_STARS,
+    noiseless: bool = Query(False, description="Return noiseless image instead"),
+):
+    """Render and return a FITS file with WCS headers."""
+    from astropy.io import fits
+    from astropy.wcs import WCS
+
+    result, config, tile, dt, n_gal, n_star = _do_render(
+        ra, dec, seed, telescope, filter_code, nside,
+        fov_arcmin, exposure_time_s, mag_limit, psf_fwhm, psf_type, include_stars,
+    )
+
+    img_key = "noiseless" if noiseless else "image"
+    img = np.array(result[img_key], dtype=np.float32)
+    h, w = img.shape
+
+    # Build WCS
+    wcs = WCS(naxis=2)
+    wcs.wcs.crpix = [w / 2.0 + 0.5, h / 2.0 + 0.5]
+    wcs.wcs.crval = [tile.ra_center, tile.dec_center]
+    pixel_scale_deg = config.telescope.pixel_scale / 3600.0
+    wcs.wcs.cdelt = [-pixel_scale_deg, pixel_scale_deg]
+    wcs.wcs.ctype = ["RA---TAN", "DEC--TAN"]
+    wcs.wcs.cunit = ["deg", "deg"]
+
+    header = wcs.to_header()
+    header["TELESCOP"] = config.telescope.name
+    header["FILTER"] = filter_code
+    header["EXPTIME"] = config.telescope.exposure_time_s
+    header["PIXSCALE"] = (config.telescope.pixel_scale, "arcsec/pixel")
+    header["SEED"] = config.seed
+    header["NGAL"] = n_gal
+    header["NSTAR"] = n_star
+    header["RENDTIME"] = (round(dt, 2), "Render time (s)")
+
+    hdu = fits.PrimaryHDU(data=img, header=header)
+    buf = io.BytesIO()
+    hdu.writeto(buf)
+    buf.seek(0)
+
+    return StreamingResponse(
+        buf,
+        media_type="application/fits",
+        headers={
+            "Content-Disposition": f"attachment; filename=skysim_{filter_code.replace('/', '_')}.fits",
             "X-Render-Time": f"{dt:.2f}",
             "X-Galaxy-Count": str(n_gal),
             "X-Star-Count": str(n_star),
