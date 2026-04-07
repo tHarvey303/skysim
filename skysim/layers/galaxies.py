@@ -93,9 +93,16 @@ class GalaxyLayer:
             n_expected = expected_count_in_volume(params, vol, log_m_min=log_m_min)
             counts_per_bin.append(max(0, n_expected))
 
-        # Poisson-sample the counts (oversample by 2x if LSS modulation active)
+        # Poisson-sample the counts.
+        # When LSS modulation is active we must oversample by max(density_field)
+        # so that expected_kept = oversample × N × mean(ρ/max_ρ) = N.
+        # Using a fixed factor of 2 would only be correct if max_density ≤ 2,
+        # which is rarely true for ZA fields.
         k1, k2 = jax.random.split(key)
-        oversample = 2.0 if density_field is not None else 1.0
+        if density_field is not None:
+            oversample = float(jnp.max(density_field))
+        else:
+            oversample = 1.0
         counts = jax.random.poisson(k1, jnp.array(counts_per_bin) * oversample)
         counts = np.array(counts, dtype=int)
         n_total = int(counts.sum())
